@@ -1,0 +1,17 @@
+name = "book-lasvegas-api"
+account_id = "9ef45508273746d6ed19ac93e11b76b1"
+main = "src/index.ts"
+compatibility_date = "2026-02-03"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "book-lasvegas-db"
+database_id = "9a33c1f5-290c-4333-87f3-76ef25b27410"
+
+[triggers]
+crons = ["*/1 * * * *"]
+
+[vars]
+ROUND_DURATION_MIN = "30"
+PRICE_REFRESH_MS = "10000"
+FLAT_THRESHOLD_PCT = "0.2"

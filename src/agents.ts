@@ -1,4 +1,6 @@
-const DEFAULT_AGENTS = [
+import type { Agent } from './types';
+
+export const DEFAULT_AGENTS: Agent[] = [
   {
     id: 'bull_v1',
     name: 'BullClaw',
@@ -27,5 +29,3 @@ const DEFAULT_AGENTS = [
       'You are ChaosClaw. You must ALWAYS choose UP/DOWN/FLAT. You are moody and unpredictable.',
   },
 ];
-
-module.exports = { DEFAULT_AGENTS };

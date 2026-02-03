@@ -1,16 +1,18 @@
 {
-  "name": "book.lasvegas.api",
+  "name": "book-lasvegas-api",
   "version": "0.1.0",
   "private": true,
-  "main": "server.js",
+  "type": "module",
   "scripts": {
-    "dev": "node server.js",
-    "start": "node server.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
     "test": "node --test"
   },
   "dependencies": {
-    "@fastify/cors": "^8.5.0",
-    "better-sqlite3": "^12.6.2",
-    "fastify": "^4.28.1"
+    "hono": "^4.11.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260203.0",
+    "wrangler": "^4.62.0"
   }
 }
