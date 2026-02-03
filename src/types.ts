@@ -1,8 +1,13 @@
 export type Env = {
   DB: D1Database;
+  PRICE_FEED: DurableObjectNamespace;
   ROUND_DURATION_MIN?: string;
   PRICE_REFRESH_MS?: string;
   FLAT_THRESHOLD_PCT?: string;
+  HL_WS_URL?: string;
+  HL_FEED?: string;
+  HL_COIN?: string;
+  PRICE_STALE_MS?: string;
 };
 
 export type MetaState = {

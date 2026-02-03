@@ -8,6 +8,14 @@ binding = "DB"
 database_name = "book-lasvegas-db"
 database_id = "9a33c1f5-290c-4333-87f3-76ef25b27410"
 
+[[durable_objects.bindings]]
+name = "PRICE_FEED"
+class_name = "PriceFeedDO"
+
+[[migrations]]
+tag = "v2"
+new_classes = ["PriceFeedDO"]
+
 [triggers]
 crons = ["*/1 * * * *"]
 
@@ -15,3 +23,7 @@ crons = ["*/1 * * * *"]
 ROUND_DURATION_MIN = "30"
 PRICE_REFRESH_MS = "10000"
 FLAT_THRESHOLD_PCT = "0.2"
+PRICE_STALE_MS = "30000"
+HL_WS_URL = "wss://api.hyperliquid.xyz/ws"
+HL_FEED = "allMids"
+HL_COIN = "BTC"

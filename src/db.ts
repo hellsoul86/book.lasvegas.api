@@ -52,6 +52,25 @@ export async function setMeta(env: Env, meta: MetaState): Promise<void> {
   ]);
 }
 
+export async function getMetaValue(env: Env, key: string): Promise<string | null> {
+  const row = await env.DB.prepare('SELECT value FROM meta WHERE key = ?')
+    .bind(key)
+    .first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+export async function setMetaValue(
+  env: Env,
+  key: string,
+  value: string
+): Promise<void> {
+  await env.DB.prepare(
+    'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  )
+    .bind(key, value)
+    .run();
+}
+
 export async function seedAgents(env: Env): Promise<void> {
   const stmt = env.DB.prepare(
     `

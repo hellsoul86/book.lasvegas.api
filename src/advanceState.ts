@@ -10,7 +10,7 @@ export async function advanceState(env: Env, config: RuntimeConfig): Promise<Met
   let meta = await getMeta(env);
   const lastAt = meta.lastPriceAt ? Date.parse(meta.lastPriceAt) : 0;
   if (!lastAt || Date.now() - lastAt >= config.priceRefreshMs) {
-    meta = await refreshPrice(meta);
+    meta = await refreshPrice(env, meta);
   }
 
   const roundService = createRoundService(env, config);

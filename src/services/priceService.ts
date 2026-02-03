@@ -1,51 +1,52 @@
-import type { MetaState } from '../types';
+import type { Env, MetaState } from '../types';
 
-async function fetchJson(url: string, timeoutMs = 6000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
+const DEFAULT_PRICE_STALE_MS = 30_000;
+
+export type LivePrice = {
+  price: number;
+  updatedAt: string;
+};
+
+function getStaleMs(env: Env) {
+  const parsed = Number(env.PRICE_STALE_MS);
+  return Number.isFinite(parsed) ? parsed : DEFAULT_PRICE_STALE_MS;
 }
 
-async function fetchPriceFromBinance() {
-  const data = await fetchJson(
-    'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT'
-  );
+export async function getLivePrice(env: Env): Promise<LivePrice> {
+  const id = env.PRICE_FEED.idFromName('primary');
+  const stub = env.PRICE_FEED.get(id);
+  const res = await stub.fetch('https://price-feed/price');
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Price feed error ${res.status}: ${body}`);
+  }
+  const data = (await res.json()) as { price: number; updated_at: string };
   const price = Number(data.price);
   if (!Number.isFinite(price)) {
-    throw new Error('Invalid price');
+    throw new Error('Invalid live price');
   }
-  return price;
+  return { price, updatedAt: data.updated_at };
 }
 
-function simulatePrice(lastPrice: number) {
-  const base = lastPrice || 42000;
-  const drift = (Math.random() - 0.5) * 0.8;
-  const next = base * (1 + drift / 100);
-  return Number(next.toFixed(2));
-}
-
-export async function refreshPrice(meta: MetaState): Promise<MetaState> {
-  let price: number;
-  try {
-    price = await fetchPriceFromBinance();
-  } catch {
-    price = simulatePrice(meta.lastPrice);
+export async function refreshPrice(env: Env, meta: MetaState): Promise<MetaState> {
+  const live = await getLivePrice(env);
+  const updatedAtMs = Date.parse(live.updatedAt);
+  if (!Number.isFinite(updatedAtMs)) {
+    throw new Error('Invalid updated_at');
   }
 
+  const staleMs = getStaleMs(env);
+  if (Date.now() - updatedAtMs > staleMs) {
+    throw new Error('Price stale');
+  }
+
+  const price = live.price;
   const next: MetaState = {
     ...meta,
     lastDeltaPct: ((price - meta.lastPrice) / meta.lastPrice) * 100,
     lastPrice: price,
     currentPrice: price,
-    lastPriceAt: new Date().toISOString(),
+    lastPriceAt: new Date(updatedAtMs).toISOString(),
   };
 
   return next;
