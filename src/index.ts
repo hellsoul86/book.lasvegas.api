@@ -5,6 +5,7 @@ import { getMeta, getMetaValue, setMetaValue, trimTable } from './db';
 import type { Env } from './types';
 import { createRoundService } from './services/roundService';
 import { getLivePrice } from './services/priceService';
+import { buildKlinesResponse, getKlineConfig } from './services/klineService';
 import { getRuntimeConfig } from './config';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -183,6 +184,45 @@ app.get('/api/diagnostics/hyperliquid/last', async (c) => {
   }
 });
 
+app.get('/api/klines', async (c) => {
+  const cacheConfig = getKlineConfig(c.env);
+  const cache = caches.default;
+  const cacheKey = new Request(c.req.url, { method: 'GET' });
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const query = c.req.query();
+  const config = getRuntimeConfig(c.env);
+  const roundService = createRoundService(c.env, config);
+  const live = await roundService.getLiveRound();
+  const fallbackSymbol = live?.symbol ?? null;
+
+  try {
+    const response = await buildKlinesResponse(c.env, {
+      symbol: query.symbol,
+      coin: query.coin,
+      intervals: query.intervals,
+      limit: query.limit,
+      startTime: query.start_time,
+      endTime: query.end_time,
+      raw: query.raw,
+      fallbackSymbol,
+    });
+
+    const hasData = Object.values(response.data).some((items) => items.length > 0);
+    const status = response.ok || hasData ? 200 : 502;
+    const res = c.json(response, status);
+    res.headers.set('cache-control', `public, max-age=${cacheConfig.cacheSec}`);
+    if (response.ok) {
+      await cache.put(cacheKey, res.clone());
+    }
+    return res;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid request';
+    return c.json({ ok: false, message }, 400);
+  }
+});
+
 app.get('/api/summary', async (c) => {
   const config = getRuntimeConfig(c.env);
   const meta = await getMeta(c.env);
@@ -328,6 +368,22 @@ const mcpTools = [
       required: ['round_id', 'direction', 'confidence', 'comment'],
     },
   },
+  {
+    name: 'get_klines',
+    description: 'Return K-line data for the requested symbol and intervals.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string' },
+        coin: { type: 'string' },
+        intervals: { type: 'string', description: 'Comma-separated intervals (e.g. 1m,5m,1h)' },
+        limit: { type: 'number', minimum: 1 },
+        start_time: { type: 'number' },
+        end_time: { type: 'number' },
+        raw: { type: 'boolean' },
+      },
+    },
+  },
 ];
 
 async function handleSubmitJudgment(
@@ -420,6 +476,22 @@ app.post('/mcp', async (c) => {
       if (name === 'get_round_context') {
         const context = await buildRoundContext(c.env);
         return c.json(jsonRpcResult(id, context));
+      }
+      if (name === 'get_klines') {
+        const config = getRuntimeConfig(c.env);
+        const roundService = createRoundService(c.env, config);
+        const live = await roundService.getLiveRound();
+        const result = await buildKlinesResponse(c.env, {
+          symbol: typeof args?.symbol === 'string' ? args.symbol : undefined,
+          coin: typeof args?.coin === 'string' ? args.coin : undefined,
+          intervals: args?.intervals,
+          limit: args?.limit,
+          startTime: args?.start_time,
+          endTime: args?.end_time,
+          raw: args?.raw,
+          fallbackSymbol: live?.symbol ?? null,
+        });
+        return c.json(jsonRpcResult(id, result));
       }
       if (name === 'submit_judgment') {
         const result = await handleSubmitJudgment(c.env, auth.agentId, args);

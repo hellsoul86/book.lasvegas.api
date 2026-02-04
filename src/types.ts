@@ -7,10 +7,15 @@ export type Env = {
   HL_WS_URL?: string;
   HL_FEED?: string;
   HL_COIN?: string;
+  HL_INFO_URL?: string;
   PRICE_STALE_MS?: string;
   ADMIN_API_TOKEN?: string;
   LOCK_WINDOW_MIN?: string;
   SIGNATURE_WINDOW_SEC?: string;
+  KLINE_DEFAULT_INTERVALS?: string;
+  KLINE_DEFAULT_LIMIT?: string;
+  KLINE_MAX_LIMIT?: string;
+  KLINE_CACHE_SEC?: string;
 };
 
 export type MetaState = {
@@ -82,6 +87,30 @@ export type FlipCard = {
   score_change: number;
   round_id: string;
   timestamp: string;
+};
+
+export type Kline = {
+  open_time: number;
+  close_time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  trades_count: number;
+};
+
+export type KlinesResponse = {
+  ok: boolean;
+  source: 'hyperliquid';
+  symbol: string;
+  coin: string;
+  intervals: string[];
+  limit: number;
+  updated_at: string;
+  data: Record<string, Kline[]>;
+  errors?: Record<string, string>;
+  raw?: Record<string, unknown>;
 };
 
 export type Summary = {
