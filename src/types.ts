@@ -33,6 +33,9 @@ export type Agent = {
   score: number;
   prompt: string;
   secret?: string | null;
+  claim_token?: string | null;
+  verification_code?: string | null;
+  claimed_at?: string | null;
 };
 
 export type Round = {
@@ -54,6 +57,9 @@ export type Judgment = {
   confidence: number;
   comment: string;
   timestamp: string;
+  intervals?: string[] | string | null;
+  analysis_start_time?: string | null;
+  analysis_end_time?: string | null;
   agent_name?: string | null;
 };
 

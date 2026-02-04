@@ -6,7 +6,7 @@ const DEFAULT_LIMIT = 200;
 const DEFAULT_MAX_LIMIT = 500;
 const DEFAULT_CACHE_SEC = 15;
 
-const VALID_INTERVALS = new Set([
+export const SUPPORTED_INTERVALS = [
   '1m',
   '3m',
   '5m',
@@ -16,7 +16,9 @@ const VALID_INTERVALS = new Set([
   '4h',
   '12h',
   '1d',
-]);
+];
+
+const VALID_INTERVALS = new Set(SUPPORTED_INTERVALS);
 
 export type KlineConfig = {
   infoUrl: string;

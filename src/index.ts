@@ -2,11 +2,17 @@ import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { advanceState } from './advanceState';
 import { getMeta, getMetaValue, setMetaValue, trimTable } from './db';
-import type { Env } from './types';
+import type { Agent, Env } from './types';
 import { createRoundService } from './services/roundService';
 import { getLivePrice } from './services/priceService';
 import { buildKlinesResponse, getKlineConfig } from './services/klineService';
 import { getRuntimeConfig } from './config';
+import {
+  generateClaimToken,
+  generateVerificationCode,
+  slugifyAgentId,
+} from './services/agentService';
+import { validateJudgmentPayload } from './services/judgmentValidation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -96,6 +102,31 @@ async function authenticateMcp(
   }
 
   return { agentId, error: null };
+}
+
+async function authenticateBearer(
+  c: Context<{ Bindings: Env }>,
+  options: { requireActive?: boolean } = {}
+): Promise<{ agent: Agent | null; error: Response | null }> {
+  const authHeader = c.req.header('authorization');
+  if (!authHeader?.toLowerCase().startsWith('bearer ')) {
+    return { agent: null, error: c.json({ ok: false, message: 'Unauthorized' }, 401) };
+  }
+  const token = authHeader.slice(7).trim();
+  if (!token) {
+    return { agent: null, error: c.json({ ok: false, message: 'Unauthorized' }, 401) };
+  }
+
+  const agent = await c.env.DB.prepare('SELECT * FROM agents WHERE secret = ?')
+    .bind(token)
+    .first<Agent>();
+  if (!agent) {
+    return { agent: null, error: c.json({ ok: false, message: 'Unauthorized' }, 401) };
+  }
+  if (options.requireActive && agent.status !== 'active') {
+    return { agent: null, error: c.json({ ok: false, message: 'Agent inactive' }, 403) };
+  }
+  return { agent, error: null };
 }
 
 async function buildRoundContext(env: Env) {
@@ -240,6 +271,125 @@ app.get('/api/summary', async (c) => {
   return c.json(summary);
 });
 
+app.post('/api/v1/agents/register', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  const description = typeof body?.description === 'string' ? body.description.trim() : '';
+  if (!name) {
+    return c.json({ ok: false, message: 'Missing name' }, 400);
+  }
+
+  const id = slugifyAgentId(name);
+  if (!id) {
+    return c.json({ ok: false, message: 'Invalid name' }, 400);
+  }
+
+  const secret = generateSecret();
+  const claimToken = generateClaimToken();
+  const verificationCode = generateVerificationCode();
+  const status = 'pending_claim';
+  const score = 0;
+  const persona = description || name;
+  const prompt = description || `Agent ${name}`;
+
+  try {
+    await c.env.DB.prepare(
+      'INSERT INTO agents (id, name, persona, status, score, prompt, secret, claim_token, verification_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    )
+      .bind(id, name, persona, status, score, prompt, secret, claimToken, verificationCode)
+      .run();
+  } catch (error) {
+    console.error(error);
+    return c.json({ ok: false, message: 'Agent already exists' }, 409);
+  }
+
+  const origin = new URL(c.req.url).origin;
+  const claimUrl = `${origin}/claim/${claimToken}`;
+  return c.json(
+    {
+      ok: true,
+      id,
+      name,
+      status,
+      api_key: secret,
+      claim_url: claimUrl,
+      verification_code: verificationCode,
+    },
+    201
+  );
+});
+
+app.get('/claim/:token', async (c) => {
+  const token = c.req.param('token');
+  if (!token) {
+    return c.json({ ok: false, message: 'Invalid claim token' }, 400);
+  }
+
+  const agent = await c.env.DB.prepare(
+    'SELECT id, status, claimed_at FROM agents WHERE claim_token = ?'
+  )
+    .bind(token)
+    .first<{ id: string; status: string; claimed_at: string | null }>();
+  if (!agent) {
+    return c.json({ ok: false, message: 'Claim token not found' }, 404);
+  }
+
+  let claimedAt = agent.claimed_at;
+  if (agent.status !== 'active') {
+    claimedAt = new Date().toISOString();
+    await c.env.DB.prepare(
+      'UPDATE agents SET status = ?, claimed_at = ? WHERE id = ?'
+    )
+      .bind('active', claimedAt, agent.id)
+      .run();
+  }
+
+  return c.json({ ok: true, id: agent.id, status: 'active', claimed_at: claimedAt });
+});
+
+app.get('/api/v1/agents/status', async (c) => {
+  const auth = await authenticateBearer(c);
+  if (auth.error) return auth.error;
+  const agent = auth.agent!;
+  return c.json({
+    ok: true,
+    id: agent.id,
+    status: agent.status,
+    claimed_at: agent.claimed_at ?? null,
+  });
+});
+
+app.get('/api/v1/agents/me', async (c) => {
+  const auth = await authenticateBearer(c);
+  if (auth.error) return auth.error;
+  const agent = auth.agent!;
+  return c.json({
+    ok: true,
+    agent: {
+      id: agent.id,
+      name: agent.name,
+      persona: agent.persona,
+      status: agent.status,
+      score: agent.score,
+      prompt: agent.prompt,
+      claimed_at: agent.claimed_at ?? null,
+    },
+  });
+});
+
+app.post('/api/v1/judgments', async (c) => {
+  const auth = await authenticateBearer(c, { requireActive: true });
+  if (auth.error) return auth.error;
+  const body = await c.req.json().catch(() => null);
+  try {
+    const result = await handleSubmitJudgment(c.env, auth.agent!.id, body);
+    return c.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid request';
+    return c.json({ ok: false, message }, 400);
+  }
+});
+
 app.get('/api/admin/agents', async (c) => {
   const auth = requireAdmin(c);
   if (auth) return auth;
@@ -364,8 +514,24 @@ const mcpTools = [
         direction: { type: 'string', enum: ['UP', 'DOWN', 'FLAT'] },
         confidence: { type: 'number', minimum: 0, maximum: 100 },
         comment: { type: 'string', maxLength: 140 },
+        intervals: {
+          anyOf: [
+            { type: 'string', description: 'Comma-separated intervals (e.g. 1m,5m,1h)' },
+            { type: 'array', items: { type: 'string' } },
+          ],
+        },
+        analysis_start_time: { anyOf: [{ type: 'number' }, { type: 'string' }] },
+        analysis_end_time: { anyOf: [{ type: 'number' }, { type: 'string' }] },
       },
-      required: ['round_id', 'direction', 'confidence', 'comment'],
+      required: [
+        'round_id',
+        'direction',
+        'confidence',
+        'comment',
+        'intervals',
+        'analysis_start_time',
+        'analysis_end_time',
+      ],
     },
   },
   {
@@ -391,20 +557,16 @@ async function handleSubmitJudgment(
   agentId: string,
   args: Record<string, unknown> | null
 ) {
-  const roundId = typeof args?.round_id === 'string' ? args.round_id : '';
-  const direction = typeof args?.direction === 'string' ? args.direction : '';
-  const confidence = Number(args?.confidence);
-  const comment = typeof args?.comment === 'string' ? args.comment.trim() : '';
-
-  if (!roundId || !['UP', 'DOWN', 'FLAT'].includes(direction)) {
-    throw new Error('Invalid payload');
-  }
-  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 100) {
-    throw new Error('Invalid confidence');
-  }
-  if (!comment || comment.length > 140) {
-    throw new Error('Invalid comment');
-  }
+  const payload = validateJudgmentPayload(args);
+  const {
+    round_id: roundId,
+    direction,
+    confidence,
+    comment,
+    intervals,
+    analysis_start_time,
+    analysis_end_time,
+  } = payload;
 
   const round = await env.DB.prepare('SELECT * FROM rounds WHERE round_id = ?')
     .bind(roundId)
@@ -423,14 +585,25 @@ async function handleSubmitJudgment(
   }
 
   const now = new Date().toISOString();
+  const intervalsJson = JSON.stringify(intervals);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM judgments WHERE round_id = ? AND agent_id = ?').bind(
       roundId,
       agentId
     ),
     env.DB.prepare(
-      'INSERT INTO judgments (round_id, agent_id, direction, confidence, comment, timestamp) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(roundId, agentId, direction, Math.round(confidence), comment, now),
+      'INSERT INTO judgments (round_id, agent_id, direction, confidence, comment, intervals, analysis_start_time, analysis_end_time, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(
+      roundId,
+      agentId,
+      direction,
+      Math.round(confidence),
+      comment,
+      intervalsJson,
+      analysis_start_time,
+      analysis_end_time,
+      now
+    ),
   ]);
   await trimTable(env, 'judgments', config.judgmentLimit);
 

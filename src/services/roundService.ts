@@ -58,6 +58,24 @@ function buildFlipCard({
   };
 }
 
+function parseIntervals(value: unknown): string[] | null {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item));
+  }
+  if (typeof value !== 'string' || value.trim() === '') {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item));
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export function createRoundService(env: Env, config: RuntimeConfig) {
   const lockWindowMs = config.lockWindowMs;
 
@@ -250,6 +268,7 @@ export function createRoundService(env: Env, config: RuntimeConfig) {
 
     const liveJudgments = (liveJudgmentsResult.results ?? []).map((item) => ({
       ...item,
+      intervals: parseIntervals(item.intervals) ?? undefined,
       agent_name: item.agent_name || item.agent_id,
     }));
 
