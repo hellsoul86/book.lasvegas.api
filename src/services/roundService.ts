@@ -11,7 +11,6 @@ import type {
   Summary,
   Verdict,
 } from '../types';
-import { generateJudgment } from './judgmentService';
 
 function roundIdFor(date: Date) {
   const pad = (num: number) => String(num).padStart(2, '0');
@@ -60,12 +59,18 @@ function buildFlipCard({
 }
 
 export function createRoundService(env: Env, config: RuntimeConfig) {
+  const lockWindowMs = config.lockWindowMs;
+
   async function getLiveRound(): Promise<Round | null> {
     return (
       await env.DB.prepare(
         "SELECT * FROM rounds WHERE status != 'settled' ORDER BY start_time DESC LIMIT 1"
       ).first<Round>()
     ) ?? null;
+  }
+
+  function getLockTimeMs(round: Round): number {
+    return new Date(round.start_time).getTime() + lockWindowMs;
   }
 
   async function startRound(meta: MetaState): Promise<Round | null> {
@@ -84,21 +89,6 @@ export function createRoundService(env: Env, config: RuntimeConfig) {
       end_time: new Date(now.getTime() + config.roundDurationMs).toISOString(),
     };
 
-    const agentsResult = await env.DB.prepare('SELECT * FROM agents').all<Agent>();
-    const agents = agentsResult.results ?? [];
-
-    const judgments: Judgment[] = agents.map((agent) => {
-      const output = generateJudgment(agent);
-      return {
-        round_id: round.round_id,
-        agent_id: agent.id,
-        direction: output.direction,
-        confidence: output.confidence,
-        comment: output.comment,
-        timestamp: now.toISOString(),
-      };
-    });
-
     const statements = [
       env.DB.prepare(
         'INSERT INTO rounds (round_id, symbol, duration_min, start_price, end_price, status, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
@@ -112,29 +102,41 @@ export function createRoundService(env: Env, config: RuntimeConfig) {
         round.start_time,
         round.end_time
       ),
-      ...judgments.map((judgment) =>
-        env.DB.prepare(
-          'INSERT INTO judgments (round_id, agent_id, direction, confidence, comment, timestamp) VALUES (?, ?, ?, ?, ?, ?)'
-        ).bind(
-          judgment.round_id,
-          judgment.agent_id,
-          judgment.direction,
-          judgment.confidence,
-          judgment.comment,
-          judgment.timestamp
-        )
-      ),
-      env.DB.prepare('UPDATE rounds SET status = ? WHERE round_id = ?').bind(
-        'locked',
-        round.round_id
-      ),
     ];
 
     await env.DB.batch(statements);
     await trimTable(env, 'rounds', config.roundLimit);
-    await trimTable(env, 'judgments', config.judgmentLimit);
 
+    return round;
+  }
+
+  async function lockRound(round: Round): Promise<Round> {
+    await env.DB.prepare('UPDATE rounds SET status = ? WHERE round_id = ?').bind(
+      'locked',
+      round.round_id
+    ).run();
     return { ...round, status: 'locked' };
+  }
+
+  async function cancelRound(round: Round): Promise<void> {
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM judgments WHERE round_id = ?').bind(round.round_id),
+      env.DB.prepare('DELETE FROM rounds WHERE round_id = ?').bind(round.round_id),
+    ]);
+  }
+
+  async function countJudgments(roundId: string): Promise<number> {
+    const row = await env.DB.prepare(
+      'SELECT COUNT(*) as count FROM judgments WHERE round_id = ?'
+    ).bind(roundId).first<{ count: number | string }>();
+    return Number(row?.count ?? 0);
+  }
+
+  async function hasActiveAgents(): Promise<boolean> {
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) as count FROM agents WHERE status = 'active' AND secret IS NOT NULL AND secret != ''"
+    ).first<{ count: number | string }>();
+    return Number(row?.count ?? 0) > 0;
   }
 
   async function settleRound(round: Round, meta: MetaState): Promise<void> {
@@ -156,7 +158,9 @@ export function createRoundService(env: Env, config: RuntimeConfig) {
       .all<Judgment>();
     const judgments = judgmentsResult.results ?? [];
 
-    const agentsResult = await env.DB.prepare('SELECT * FROM agents').all<Agent>();
+    const agentsResult = await env.DB.prepare(
+      'SELECT id, name, persona, status, score, prompt FROM agents'
+    ).all<Agent>();
     const agents = agentsResult.results ?? [];
     const agentMap = new Map(agents.map((agent) => [agent.id, agent]));
 
@@ -263,7 +267,9 @@ export function createRoundService(env: Env, config: RuntimeConfig) {
         .first<Judgment>();
 
       if (top) {
-        const agent = await env.DB.prepare('SELECT * FROM agents WHERE id = ?')
+        const agent = await env.DB.prepare(
+          'SELECT id, name, persona, status, score, prompt FROM agents WHERE id = ?'
+        )
           .bind(top.agent_id)
           .first<Agent>();
         if (agent) {
@@ -343,7 +349,12 @@ export function createRoundService(env: Env, config: RuntimeConfig) {
 
   return {
     getLiveRound,
+    getLockTimeMs,
     startRound,
+    lockRound,
+    cancelRound,
+    countJudgments,
+    hasActiveAgents,
     settleRound,
     buildSummary,
   };

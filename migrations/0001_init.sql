@@ -4,7 +4,8 @@ CREATE TABLE IF NOT EXISTS agents (
   persona TEXT,
   status TEXT,
   score INTEGER,
-  prompt TEXT
+  prompt TEXT,
+  secret TEXT
 );
 
 CREATE TABLE IF NOT EXISTS rounds (

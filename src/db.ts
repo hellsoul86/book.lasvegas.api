@@ -1,5 +1,4 @@
-import { DEFAULT_AGENTS } from './agents';
-import type { Agent, Env, MetaState } from './types';
+import type { Env, MetaState } from './types';
 
 const DEFAULT_META: MetaState = {
   lastPrice: 42000,
@@ -69,34 +68,6 @@ export async function setMetaValue(
   )
     .bind(key, value)
     .run();
-}
-
-export async function seedAgents(env: Env): Promise<void> {
-  const stmt = env.DB.prepare(
-    `
-      INSERT INTO agents (id, name, persona, status, score, prompt)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        persona = excluded.persona,
-        prompt = excluded.prompt,
-        status = COALESCE(agents.status, excluded.status),
-        score = COALESCE(agents.score, excluded.score)
-    `
-  );
-
-  const statements = DEFAULT_AGENTS.map((agent: Agent) =>
-    stmt.bind(
-      agent.id,
-      agent.name,
-      agent.persona,
-      agent.status,
-      agent.score,
-      agent.prompt
-    )
-  );
-
-  await env.DB.batch(statements);
 }
 
 export async function trimTable(

@@ -8,6 +8,9 @@ export type Env = {
   HL_FEED?: string;
   HL_COIN?: string;
   PRICE_STALE_MS?: string;
+  ADMIN_API_TOKEN?: string;
+  LOCK_WINDOW_MIN?: string;
+  SIGNATURE_WINDOW_SEC?: string;
 };
 
 export type MetaState = {
@@ -24,6 +27,7 @@ export type Agent = {
   status: string;
   score: number;
   prompt: string;
+  secret?: string | null;
 };
 
 export type Round = {
