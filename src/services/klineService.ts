@@ -80,7 +80,7 @@ function parseTime(value: unknown): number | null {
   return null;
 }
 
-function intervalToMs(interval: string): number {
+export function intervalToMs(interval: string): number {
   const unit = interval.slice(-1);
   const count = Number(interval.slice(0, -1));
   if (!Number.isFinite(count) || count <= 0) {
@@ -92,7 +92,7 @@ function intervalToMs(interval: string): number {
   throw new Error(`Invalid interval: ${interval}`);
 }
 
-function alignEndTime(timestampMs: number, intervalMs: number): number {
+export function alignEndTime(timestampMs: number, intervalMs: number): number {
   return Math.floor(timestampMs / intervalMs) * intervalMs;
 }
 
@@ -232,6 +232,53 @@ function normalizeKlines(
       trades_count: candle.n ? Number(candle.n) : 0,
     };
   });
+}
+
+export async function fetchKlines(
+  env: Env,
+  options: {
+    coin: string;
+    interval: string;
+    startTime: number;
+    endTime: number;
+    limit: number;
+  }
+): Promise<Kline[]> {
+  const config = getKlineConfig(env);
+  const coin = normalizeCoin(options.coin);
+  if (!coin) {
+    throw new Error('Missing coin');
+  }
+  if (coin !== 'BTC') {
+    throw new Error('Only BTC is supported right now');
+  }
+
+  const interval = String(options.interval).trim().toLowerCase();
+  if (!VALID_INTERVALS.has(interval)) {
+    throw new Error(`Invalid interval: ${interval}`);
+  }
+
+  const limit = normalizeLimit(options.limit, config.defaultLimit, config.maxLimit);
+
+  const startTime = Number(options.startTime);
+  const endTime = Number(options.endTime);
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) {
+    throw new Error('Invalid time range');
+  }
+  if (startTime >= endTime) {
+    throw new Error('Start time must be before end time');
+  }
+
+  const intervalMs = intervalToMs(interval);
+  const candles = await fetchHyperliquidCandles(
+    config.infoUrl,
+    coin,
+    interval,
+    startTime,
+    endTime,
+    limit
+  );
+  return normalizeKlines(candles, intervalMs);
 }
 
 export async function buildKlinesResponse(

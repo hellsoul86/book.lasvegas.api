@@ -1,4 +1,6 @@
 import { SUPPORTED_INTERVALS } from './klineService';
+import type { ReasonRule } from '../types';
+import { normalizeReasonRule } from './reasonRuleService';
 
 const VALID_INTERVALS = new Set(SUPPORTED_INTERVALS.map((interval) => interval.toLowerCase()));
 
@@ -10,6 +12,7 @@ export type NormalizedJudgmentPayload = {
   intervals: string[];
   analysis_start_time: string;
   analysis_end_time: string;
+  reason_rule: ReasonRule;
 };
 
 function parseNumber(value: unknown): number | null {
@@ -110,6 +113,10 @@ export function validateJudgmentPayload(
     payload?.analysis_start_time,
     payload?.analysis_end_time
   );
+  const reasonRule = normalizeReasonRule(payload?.reason_rule, {
+    allowedIntervals: intervals,
+    expectedDirection: direction,
+  });
 
   return {
     round_id: roundId,
@@ -119,5 +126,6 @@ export function validateJudgmentPayload(
     intervals,
     analysis_start_time: timeRange.startIso,
     analysis_end_time: timeRange.endIso,
+    reason_rule: reasonRule,
   };
 }

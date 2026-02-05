@@ -6,6 +6,7 @@ import type {
   FlipCard,
   Judgment,
   MetaState,
+  ReasonRule,
   Round,
   ScoreEvent,
   Summary,
@@ -74,6 +75,37 @@ function parseIntervals(value: unknown): string[] | null {
     return null;
   }
   return null;
+}
+
+function parseReasonRule(value: unknown): ReasonRule | null {
+  if (!value) return null;
+
+  const coerce = (candidate: any): ReasonRule | null => {
+    if (!candidate || typeof candidate !== 'object') return null;
+    const timeframe = typeof candidate.timeframe === 'string' ? candidate.timeframe : null;
+    const pattern = typeof candidate.pattern === 'string' ? candidate.pattern : null;
+    const direction = typeof candidate.direction === 'string' ? candidate.direction : null;
+    const horizon = candidate.horizon_bars;
+    const horizonBars = typeof horizon === 'number' ? horizon : Number(horizon);
+    if (!timeframe || !pattern || !direction) return null;
+    if (!Number.isFinite(horizonBars)) return null;
+    return {
+      timeframe,
+      pattern,
+      direction: direction as ReasonRule['direction'],
+      horizon_bars: Math.floor(horizonBars),
+    };
+  };
+
+  if (typeof value === 'object') {
+    return coerce(value);
+  }
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  try {
+    return coerce(JSON.parse(value));
+  } catch {
+    return null;
+  }
 }
 
 export function createRoundService(env: Env, config: RuntimeConfig) {
@@ -269,6 +301,15 @@ export function createRoundService(env: Env, config: RuntimeConfig) {
     const liveJudgments = (liveJudgmentsResult.results ?? []).map((item) => ({
       ...item,
       intervals: parseIntervals(item.intervals) ?? undefined,
+      reason_rule: parseReasonRule(item.reason_rule) ?? undefined,
+      reason_pattern_holds:
+        typeof item.reason_pattern_holds === 'number'
+          ? Boolean(item.reason_pattern_holds)
+          : item.reason_pattern_holds ?? undefined,
+      reason_correct:
+        typeof item.reason_correct === 'number'
+          ? Boolean(item.reason_correct)
+          : item.reason_correct ?? undefined,
       agent_name: item.agent_name || item.agent_id,
     }));
 

@@ -13,10 +13,29 @@ import {
   slugifyAgentId,
 } from './services/agentService';
 import { validateJudgmentPayload } from './services/judgmentValidation';
+import { evaluatePendingReasonRules, evaluateReasonRuleOnSubmit } from './services/reasonRuleService';
+import { getReasonStats } from './services/reasonStatsService';
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.use('*', cors({ origin: '*' }));
+const corsAllowHeaders = [
+  'Content-Type',
+  'Authorization',
+  'X-Admin-Token',
+  'X-Agent-Id',
+  'X-Signature',
+  'X-Ts',
+];
+
+app.use(
+  '*',
+  cors({
+    origin: ['https://lasvegasclaw.ai', 'https://www.lasvegasclaw.ai'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: corsAllowHeaders,
+    maxAge: 86400,
+  })
+);
 
 const encoder = new TextEncoder();
 
@@ -200,7 +219,7 @@ app.get('/api/diagnostics/hyperliquid', async (c) => {
   const res = await stub.fetch('https://price-feed/diag');
   const payload = await res.json();
   await setMetaValue(c.env, 'lastHyperliquidDiag', JSON.stringify(payload));
-  return c.json(payload, res.status);
+  return c.json(payload, res.status as any);
 });
 
 app.get('/api/diagnostics/hyperliquid/last', async (c) => {
@@ -269,6 +288,50 @@ app.get('/api/summary', async (c) => {
   }
   const summary = await roundService.buildSummary(meta);
   return c.json(summary);
+});
+
+app.get('/api/reason-stats', async (c) => {
+  const query = c.req.query();
+  try {
+    const result = await getReasonStats(c.env, {
+      scope: 'global',
+      since: query.since,
+      until: query.until,
+      limit: query.limit,
+    });
+    return c.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid request';
+    return c.json({ ok: false, message }, 400);
+  }
+});
+
+app.get('/api/agents/:id/reason-stats', async (c) => {
+  const agentId = c.req.param('id');
+  if (!agentId) {
+    return c.json({ ok: false, message: 'Invalid agent id' }, 400);
+  }
+  const existing = await c.env.DB.prepare('SELECT id FROM agents WHERE id = ?')
+    .bind(agentId)
+    .first<{ id: string }>();
+  if (!existing) {
+    return c.json({ ok: false, message: 'Agent not found' }, 404);
+  }
+
+  const query = c.req.query();
+  try {
+    const result = await getReasonStats(c.env, {
+      scope: 'agent',
+      agentId,
+      since: query.since,
+      until: query.until,
+      limit: query.limit,
+    });
+    return c.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid request';
+    return c.json({ ok: false, message }, 400);
+  }
 });
 
 app.post('/api/v1/agents/register', async (c) => {
@@ -522,6 +585,17 @@ const mcpTools = [
         },
         analysis_start_time: { anyOf: [{ type: 'number' }, { type: 'string' }] },
         analysis_end_time: { anyOf: [{ type: 'number' }, { type: 'string' }] },
+        reason_rule: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            timeframe: { type: 'string' },
+            pattern: { type: 'string' },
+            direction: { type: 'string', enum: ['UP', 'DOWN', 'FLAT'] },
+            horizon_bars: { type: 'number', minimum: 1, maximum: 200 },
+          },
+          required: ['timeframe', 'pattern', 'direction', 'horizon_bars'],
+        },
       },
       required: [
         'round_id',
@@ -531,6 +605,7 @@ const mcpTools = [
         'intervals',
         'analysis_start_time',
         'analysis_end_time',
+        'reason_rule',
       ],
     },
   },
@@ -566,6 +641,7 @@ async function handleSubmitJudgment(
     intervals,
     analysis_start_time,
     analysis_end_time,
+    reason_rule,
   } = payload;
 
   const round = await env.DB.prepare('SELECT * FROM rounds WHERE round_id = ?')
@@ -586,13 +662,15 @@ async function handleSubmitJudgment(
 
   const now = new Date().toISOString();
   const intervalsJson = JSON.stringify(intervals);
+  const reasonRuleJson = JSON.stringify(reason_rule);
+  const reasonEval = await evaluateReasonRuleOnSubmit(env, reason_rule, analysis_end_time);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM judgments WHERE round_id = ? AND agent_id = ?').bind(
       roundId,
       agentId
     ),
     env.DB.prepare(
-      'INSERT INTO judgments (round_id, agent_id, direction, confidence, comment, intervals, analysis_start_time, analysis_end_time, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO judgments (round_id, agent_id, direction, confidence, comment, intervals, analysis_start_time, analysis_end_time, reason_rule, reason_timeframe, reason_pattern, reason_direction, reason_horizon_bars, reason_t_close_ms, reason_target_close_ms, reason_base_close, reason_pattern_holds, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).bind(
       roundId,
       agentId,
@@ -602,12 +680,28 @@ async function handleSubmitJudgment(
       intervalsJson,
       analysis_start_time,
       analysis_end_time,
+      reasonRuleJson,
+      reason_rule.timeframe,
+      reason_rule.pattern,
+      reason_rule.direction,
+      reason_rule.horizon_bars,
+      reasonEval.t_close_ms,
+      reasonEval.target_close_ms,
+      reasonEval.base_close,
+      reasonEval.pattern_holds ? 1 : 0,
       now
     ),
   ]);
   await trimTable(env, 'judgments', config.judgmentLimit);
 
-  return { ok: true };
+  return {
+    ok: true,
+    reason: {
+      t_close_ms: reasonEval.t_close_ms,
+      target_close_ms: reasonEval.target_close_ms,
+      pattern_holds: reasonEval.pattern_holds,
+    },
+  };
 }
 
 app.post('/mcp', async (c) => {
@@ -729,6 +823,6 @@ export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     const config = getRuntimeConfig(env);
-    ctx.waitUntil(advanceState(env, config));
+    ctx.waitUntil(Promise.all([advanceState(env, config), evaluatePendingReasonRules(env, config)]));
   },
 };

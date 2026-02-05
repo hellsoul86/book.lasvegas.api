@@ -39,3 +39,63 @@ test('validateJudgmentPayload requires intervals and time range', () => {
     /intervals|analysis/i
   );
 });
+
+test('validateJudgmentPayload requires reason_rule', () => {
+  assert.throws(
+    () =>
+      validateJudgmentPayload({
+        round_id: 'r1',
+        direction: 'UP',
+        confidence: 80,
+        comment: 'test',
+        intervals: ['1m'],
+        analysis_start_time: '2026-02-04T00:00:00Z',
+        analysis_end_time: '2026-02-04T01:00:00Z',
+      }),
+    /reason_rule/i
+  );
+});
+
+test('validateJudgmentPayload enforces reason_rule.timeframe within intervals', () => {
+  assert.throws(
+    () =>
+      validateJudgmentPayload({
+        round_id: 'r1',
+        direction: 'UP',
+        confidence: 80,
+        comment: 'test',
+        intervals: ['1m'],
+        analysis_start_time: '2026-02-04T00:00:00Z',
+        analysis_end_time: '2026-02-04T01:00:00Z',
+        reason_rule: {
+          timeframe: '5m',
+          pattern: 'candle.doji.v1',
+          direction: 'UP',
+          horizon_bars: 3,
+        },
+      }),
+    /timeframe.*intervals/i
+  );
+});
+
+test('validateJudgmentPayload enforces reason_rule.direction matches direction', () => {
+  assert.throws(
+    () =>
+      validateJudgmentPayload({
+        round_id: 'r1',
+        direction: 'UP',
+        confidence: 80,
+        comment: 'test',
+        intervals: ['1m'],
+        analysis_start_time: '2026-02-04T00:00:00Z',
+        analysis_end_time: '2026-02-04T01:00:00Z',
+        reason_rule: {
+          timeframe: '1m',
+          pattern: 'candle.doji.v1',
+          direction: 'DOWN',
+          horizon_bars: 3,
+        },
+      }),
+    /direction must match/i
+  );
+});

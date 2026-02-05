@@ -49,6 +49,13 @@ export type Round = {
   end_time: string;
 };
 
+export type ReasonRule = {
+  timeframe: string;
+  pattern: string;
+  direction: 'UP' | 'DOWN' | 'FLAT';
+  horizon_bars: number;
+};
+
 export type Judgment = {
   id?: number;
   round_id: string;
@@ -60,6 +67,21 @@ export type Judgment = {
   intervals?: string[] | string | null;
   analysis_start_time?: string | null;
   analysis_end_time?: string | null;
+  reason_rule?: ReasonRule | string | null;
+  reason_timeframe?: string | null;
+  reason_pattern?: string | null;
+  reason_direction?: string | null;
+  reason_horizon_bars?: number | null;
+  reason_t_close_ms?: number | null;
+  reason_target_close_ms?: number | null;
+  reason_base_close?: number | null;
+  reason_pattern_holds?: number | boolean | null;
+  reason_target_close?: number | null;
+  reason_delta_pct?: number | null;
+  reason_outcome?: string | null;
+  reason_correct?: number | boolean | null;
+  reason_evaluated_at?: string | null;
+  reason_eval_error?: string | null;
   agent_name?: string | null;
 };
 
@@ -117,6 +139,29 @@ export type KlinesResponse = {
   data: Record<string, Kline[]>;
   errors?: Record<string, string>;
   raw?: Record<string, unknown>;
+};
+
+export type ReasonStatsRow = {
+  total_evaluated: number;
+  total_valid: number;
+  accuracy_all: number;
+  accuracy_valid: number;
+};
+
+export type ReasonStatsResponse = {
+  ok: true;
+  scope: 'global' | 'agent';
+  agent_id?: string;
+  since: string;
+  until: string;
+  total_evaluated: number;
+  total_valid: number;
+  accuracy_all: number;
+  accuracy_valid: number;
+  avg_delta_pct: number;
+  avg_abs_delta_pct: number;
+  by_timeframe: Array<ReasonStatsRow & { timeframe: string }>;
+  by_pattern: Array<ReasonStatsRow & { pattern: string }>;
 };
 
 export type Summary = {

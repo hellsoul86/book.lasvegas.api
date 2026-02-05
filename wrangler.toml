@@ -2,6 +2,11 @@ name = "book-lasvegas-api"
 account_id = "9ef45508273746d6ed19ac93e11b76b1"
 main = "src/index.ts"
 compatibility_date = "2026-02-03"
+workers_dev = true
+
+[[routes]]
+pattern = "api.lasvegasclaw.ai"
+custom_domain = true
 
 [[d1_databases]]
 binding = "DB"
